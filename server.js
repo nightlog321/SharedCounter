@@ -143,38 +143,41 @@ app.get("/", (req, res) => {
     </div>
 
     <script>
-      const countEl = document.getElementById('count');
-      const statusEl = document.getElementById('status');
+  const countEl = document.getElementById('count');
+  const statusEl = document.getElementById('status');
 
-      async function fetchCount() {
-        const res = await fetch('/count');
-        const data = await res.json();
-        countEl.textContent = data.value;
-      }
+  async function fetchCount() {
+    const res = await fetch('/count');
+    const data = await res.json();
+    countEl.textContent = data.count; // note: backend sends { count: ... }
+  }
 
-      async function updateCount(delta) {
-        const url = delta > 0 ? '/increment' : '/decrement';
-        await fetch(url, { method: 'POST' });
-      }
+  async function updateCount(delta) {
+    await fetch('/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delta })
+    });
+  }
 
-      // --- WebSocket setup ---
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(protocol + '//' + window.location.host);
+  // --- WebSocket setup ---
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(protocol + '//' + window.location.host);
 
-      
-      ws.onopen = () => statusEl.textContent = "Live 🔴";
-      ws.onclose = () => statusEl.textContent = "Disconnected ⚪";
-      ws.onerror = () => statusEl.textContent = "Error ⚠️";
+  ws.onopen = () => statusEl.textContent = "Live 🔴";
+  ws.onclose = () => statusEl.textContent = "Disconnected ⚪";
+  ws.onerror = () => statusEl.textContent = "Error ⚠️";
 
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'counter') {
-          countEl.textContent = msg.value;
-        }
-      };
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'countUpdate') {
+      countEl.textContent = msg.value;
+    }
+  };
 
-      fetchCount();
-    </script>
+  fetchCount();
+</script>
+
   </body>
 </html>
 
