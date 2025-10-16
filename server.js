@@ -59,59 +59,124 @@ cron.schedule("0 23 * * *", () => {
 // --- Serve frontend ---
 app.get("/", (req, res) => {
   res.send(`
-    <html>
-      <head>
-        <title>Shared Counter</title>
-        <style>
-          body { font-family: sans-serif; text-align: center; margin-top: 100px; background: #fafafa; }
-          h1 { font-size: 72px; margin-bottom: 30px; }
-          button { font-size: 36px; margin: 10px; width: 80px; height: 80px; border-radius: 50%; border: none; box-shadow: 0 2px 5px rgba(0,0,0,0.2); cursor: pointer; }
-          button:hover { background: #eee; }
-          #status { margin-top: 20px; font-size: 18px; color: gray; }
-        </style>
-      </head>
-      <body>
-        <h1 id="count">0</h1>
-        <button onclick="updateCount(1)">+</button>
-        <button onclick="updateCount(-1)">−</button>
-        <div id="status">Connecting...</div>
-        <script>
-          const countEl = document.getElementById('count');
-          const statusEl = document.getElementById('status');
+<html>
+  <head>
+    <title>🌟 Shared Counter</title>
+    <style>
+      /* Full-screen flex centering */
+      body, html {
+        height: 100%;
+        margin: 0;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #f5f5f5;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
 
-          async function fetchCount() {
-            const res = await fetch('/count');
-            const data = await res.json();
-            countEl.textContent = data.count;
-          }
+      .container {
+        text-align: center;
+      }
 
-          async function updateCount(delta) {
-            await fetch('/update', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ delta })
-            });
-          }
+      h1#title {
+        font-size: 48px;
+        margin-bottom: 40px;
+        color: #333;
+      }
 
-          // --- WebSocket setup ---
-          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-          const ws = new WebSocket(\`\${protocol}//\${window.location.host}\`);
+      h1#count {
+        font-size: 120px;       
+        margin-bottom: 50px;
+        color: #222;
+      }
 
-          ws.onopen = () => statusEl.textContent = "Live 🔴";
-          ws.onclose = () => statusEl.textContent = "Disconnected ⚪";
-          ws.onerror = () => statusEl.textContent = "Error ⚠️";
+      .buttons {
+        display: flex;
+        justify-content: center;
+        gap: 60px; /* space between buttons */
+        margin-bottom: 30px;
+      }
 
-          ws.onmessage = (event) => {
-            const msg = JSON.parse(event.data);
-            if (msg.type === 'countUpdate') {
-              countEl.textContent = msg.value;
-            }
-          };
+      .btn {
+        font-size: 60px;        
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        border: none;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        cursor: pointer;
+        transition: transform 0.1s, background-color 0.2s;
+        color: white;
+      }
 
-          fetchCount();
-        </script>
-      </body>
-    </html>
+      .btn.increment {
+        background-color: #4CAF50;
+      }
+      .btn.increment:hover {
+        background-color: #45a049;
+        transform: scale(1.05);
+      }
+
+      .btn.decrement {
+        background-color: #f44336;
+      }
+      .btn.decrement:hover {
+        background-color: #e53935;
+        transform: scale(1.05);
+      }
+
+      #status {
+        font-size: 20px;
+        color: gray;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1 id="title">🌟 Shared Counter 🌟</h1>
+      <h1 id="count">0</h1>
+      <div class="buttons">
+        <button class="btn decrement" onclick="updateCount(-1)">−</button>
+        <button class="btn increment" onclick="updateCount(1)">+</button>
+      </div>
+      <div id="status">Connecting...</div>
+    </div>
+
+    <script>
+      const countEl = document.getElementById('count');
+      const statusEl = document.getElementById('status');
+
+      async function fetchCount() {
+        const res = await fetch('/count');
+        const data = await res.json();
+        countEl.textContent = data.value;
+      }
+
+      async function updateCount(delta) {
+        const url = delta > 0 ? '/increment' : '/decrement';
+        await fetch(url, { method: 'POST' });
+      }
+
+      // --- WebSocket setup ---
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${protocol}//${window.location.host}`);
+      
+      ws.onopen = () => statusEl.textContent = "Live 🔴";
+      ws.onclose = () => statusEl.textContent = "Disconnected ⚪";
+      ws.onerror = () => statusEl.textContent = "Error ⚠️";
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'counter') {
+          countEl.textContent = msg.value;
+        }
+      };
+
+      fetchCount();
+    </script>
+  </body>
+</html>
+
   `);
 });
 
