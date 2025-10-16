@@ -8,13 +8,24 @@ const app = express();
 app.use(express.json());
 
 // --- SQLite setup ---
-const db = new sqlite3.Database("counter.db");
-db.run("CREATE TABLE IF NOT EXISTS counter (id INTEGER PRIMARY KEY, value INTEGER)");
-db.get("SELECT * FROM counter WHERE id = 1", (err, row) => {
-  if (!row) db.run("INSERT INTO counter (id, value) VALUES (1, 0)");
+const DB_PATH = process.env.RENDER ? "/data/counter.db" : "counter.db";
+const db = new sqlite3.Database(DB_PATH);
+
+db.serialize(() => {
+  db.run("CREATE TABLE IF NOT EXISTS counter (id INTEGER PRIMARY KEY, value INTEGER)");
+  db.get("SELECT * FROM counter WHERE id = 1", (err, row) => {
+    if (err) {
+      console.error("❌ Error checking counter table:", err);
+    } else if (!row) {
+      db.run("INSERT INTO counter (id, value) VALUES (1, 0)");
+      console.log("✅ Initialized counter table");
+    } else {
+      console.log("✅ Counter table already initialized");
+    }
+  });
 });
 
-// --- Express routes ---
+// --- Express API routes ---
 app.get("/count", (req, res) => {
   db.get("SELECT value FROM counter WHERE id = 1", (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -28,16 +39,16 @@ app.post("/update", (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
 
     db.get("SELECT value FROM counter WHERE id = 1", (err, row) => {
-      if (!err) broadcastCount(row.value); // notify all clients
+      if (!err && row) broadcastCount(row.value);
     });
 
     res.json({ ok: true });
   });
 });
 
-// --- Daily reset at 11PM IST ---
+// --- Daily reset at 11 PM IST ---
 cron.schedule("0 23 * * *", () => {
-  console.log("Resetting counter at 11PM IST");
+  console.log("🕚 Resetting counter at 11PM IST");
   db.run("UPDATE counter SET value = 0 WHERE id = 1", err => {
     if (!err) broadcastCount(0);
   });
@@ -52,17 +63,21 @@ app.get("/", (req, res) => {
       <head>
         <title>Shared Counter</title>
         <style>
-          body { font-family: sans-serif; text-align: center; margin-top: 100px; }
-          h1 { font-size: 72px; }
-          button { font-size: 36px; margin: 10px; width: 80px; height: 80px; }
+          body { font-family: sans-serif; text-align: center; margin-top: 100px; background: #fafafa; }
+          h1 { font-size: 72px; margin-bottom: 30px; }
+          button { font-size: 36px; margin: 10px; width: 80px; height: 80px; border-radius: 50%; border: none; box-shadow: 0 2px 5px rgba(0,0,0,0.2); cursor: pointer; }
+          button:hover { background: #eee; }
+          #status { margin-top: 20px; font-size: 18px; color: gray; }
         </style>
       </head>
       <body>
         <h1 id="count">0</h1>
         <button onclick="updateCount(1)">+</button>
         <button onclick="updateCount(-1)">−</button>
+        <div id="status">Connecting...</div>
         <script>
           const countEl = document.getElementById('count');
+          const statusEl = document.getElementById('status');
 
           async function fetchCount() {
             const res = await fetch('/count');
@@ -79,7 +94,13 @@ app.get("/", (req, res) => {
           }
 
           // --- WebSocket setup ---
-          const ws = new WebSocket(\`ws://\${window.location.host}\`);
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const ws = new WebSocket(\`\${protocol}//\${window.location.host}\`);
+
+          ws.onopen = () => statusEl.textContent = "Live 🔴";
+          ws.onclose = () => statusEl.textContent = "Disconnected ⚪";
+          ws.onerror = () => statusEl.textContent = "Error ⚠️";
+
           ws.onmessage = (event) => {
             const msg = JSON.parse(event.data);
             if (msg.type === 'countUpdate') {
@@ -98,20 +119,17 @@ app.get("/", (req, res) => {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Track clients
 function broadcastCount(value) {
   const payload = JSON.stringify({ type: "countUpdate", value });
   for (const client of wss.clients) {
-    if (client.readyState === 1) {
-      client.send(payload);
-    }
+    if (client.readyState === 1) client.send(payload);
   }
 }
 
 wss.on("connection", (ws) => {
-  // Send current count immediately on connection
   db.get("SELECT value FROM counter WHERE id = 1", (err, row) => {
-    if (!err) ws.send(JSON.stringify({ type: "countUpdate", value: row.value }));
+    if (!err && row)
+      ws.send(JSON.stringify({ type: "countUpdate", value: row.value }));
   });
 });
 
