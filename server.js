@@ -204,3 +204,17 @@ wss.on("connection", (ws) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
+
+// ----------------------
+// Self-ping to stay alive
+// ----------------------
+setInterval(async () => {
+  try {
+    const url = `http://localhost:${PORT}/count`; // hit your own /count route
+    const res = await fetch(url);
+    if (res.ok) console.log("🔔 Self-ping successful");
+  } catch (err) {
+    console.error("⚠️ Self-ping failed:", err);
+  }
+}, 10 * 60 * 1000); // every 10 minutes
