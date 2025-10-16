@@ -8,7 +8,7 @@ const app = express();
 app.use(express.json());
 
 // --- SQLite setup ---
-const DB_PATH = process.env.RENDER ? "/data/counter.db" : "counter.db";
+const DB_PATH = "./counter.db";
 const db = new sqlite3.Database(DB_PATH);
 
 db.serialize(() => {
