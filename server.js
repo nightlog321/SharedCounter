@@ -133,10 +133,10 @@ app.get("/", (req, res) => {
   </head>
   <body>
     <div class="container">
-      <h1 id="title">🌟 Shared Counter 🌟</h1>
+      <h1 id="title">🌟 SAH LIVE OP COUNTER 🌟</h1>
       <h1 id="count">0</h1>
       <div class="buttons">
-        <button class="btn decrement" onclick="updateCount(-1)">−</button>
+        <button class="btn decrement" onclick="updateCount(-1)">-</button>
         <button class="btn increment" onclick="updateCount(1)">+</button>
       </div>
       <div id="status">Connecting...</div>
