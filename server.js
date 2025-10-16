@@ -159,7 +159,8 @@ app.get("/", (req, res) => {
 
       // --- WebSocket setup ---
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${protocol}//${window.location.host}`);
+      const ws = new WebSocket(protocol + '//' + window.location.host);
+
       
       ws.onopen = () => statusEl.textContent = "Live 🔴";
       ws.onclose = () => statusEl.textContent = "Disconnected ⚪";
