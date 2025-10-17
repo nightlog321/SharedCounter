@@ -1,5 +1,5 @@
 import express from "express";
-import fetch from "node-fetch";
+// Node 18+ already includes global fetch — no import needed
 import cron from "node-cron";
 import { WebSocketServer } from "ws";
 import http from "http";
