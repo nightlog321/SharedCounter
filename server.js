@@ -13,9 +13,18 @@ const API_KEY = process.env.API_KEY;
 const BASE_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
 async function getCount() {
-  const res = await fetch(BASE_URL, { headers: { "X-Master-Key": API_KEY } });
+  const res = await fetch(BASE_URL, {
+    headers: { "X-Master-Key": API_KEY },
+  });
   const data = await res.json();
-  return data.record.count;
+
+  // Debug log to check what JSONBin returns
+  if (!data || !data.record) {
+    console.error("Unexpected JSONBin response:", JSON.stringify(data));
+    return 0; // fallback
+  }
+
+  return data.record.count ?? 0;
 }
 
 async function updateCount(newCount) {
