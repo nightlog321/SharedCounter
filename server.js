@@ -1,5 +1,5 @@
 import express from "express";
-import sqlite3 from "sqlite3";
+import fetch from "node-fetch";
 import cron from "node-cron";
 import { WebSocketServer } from "ws";
 import http from "http";
@@ -7,54 +7,77 @@ import http from "http";
 const app = express();
 app.use(express.json());
 
-// --- SQLite setup ---
-const DB_PATH = "./counter.db";
-const db = new sqlite3.Database(DB_PATH);
+// --- JSONBin setup ---
+const BIN_ID = process.env.BIN_ID;
+const API_KEY = process.env.API_KEY;
+const BASE_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
-db.serialize(() => {
-  db.run("CREATE TABLE IF NOT EXISTS counter (id INTEGER PRIMARY KEY, value INTEGER)");
-  db.get("SELECT * FROM counter WHERE id = 1", (err, row) => {
-    if (err) {
-      console.error("❌ Error checking counter table:", err);
-    } else if (!row) {
-      db.run("INSERT INTO counter (id, value) VALUES (1, 0)");
-      console.log("✅ Initialized counter table");
-    } else {
-      console.log("✅ Counter table already initialized");
-    }
+async function getCount() {
+  const res = await fetch(BASE_URL, { headers: { "X-Master-Key": API_KEY } });
+  const data = await res.json();
+  return data.record.count;
+}
+
+async function updateCount(newCount) {
+  await fetch(BASE_URL, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Master-Key": API_KEY,
+    },
+    body: JSON.stringify({ count: newCount }),
   });
+}
+
+// --- WebSocket setup ---
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+async function broadcastCount() {
+  const count = await getCount();
+  const msg = JSON.stringify({ type: "counter", value: count });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) client.send(msg);
+  });
+}
+
+wss.on("connection", async (ws) => {
+  const count = await getCount();
+  ws.send(JSON.stringify({ type: "counter", value: count }));
 });
 
-// --- Express API routes ---
-app.get("/count", (req, res) => {
-  db.get("SELECT value FROM counter WHERE id = 1", (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ count: row.value });
-  });
+// --- API routes ---
+app.get("/count", async (req, res) => {
+  const count = await getCount();
+  res.json({ value: count });
 });
 
-app.post("/update", (req, res) => {
-  const delta = req.body.delta;
-  db.run("UPDATE counter SET value = value + ? WHERE id = 1", [delta], err => {
-    if (err) return res.status(500).json({ error: err.message });
+app.post("/increment", async (req, res) => {
+  let count = await getCount();
+  count++;
+  await updateCount(count);
+  broadcastCount();
+  res.json({ value: count });
+});
 
-    db.get("SELECT value FROM counter WHERE id = 1", (err, row) => {
-      if (!err && row) broadcastCount(row.value);
-    });
-
-    res.json({ ok: true });
-  });
+app.post("/decrement", async (req, res) => {
+  let count = await getCount();
+  count--;
+  await updateCount(count);
+  broadcastCount();
+  res.json({ value: count });
 });
 
 // --- Daily reset at 11 PM IST ---
-cron.schedule("0 23 * * *", () => {
-  console.log("🕚 Resetting counter at 11PM IST");
-  db.run("UPDATE counter SET value = 0 WHERE id = 1", err => {
-    if (!err) broadcastCount(0);
-  });
-}, {
-  timezone: "Asia/Kolkata"
-});
+cron.schedule(
+  "0 23 * * *",
+  async () => {
+    console.log("🕚 Resetting counter at 11PM IST");
+    await updateCount(0);
+    broadcastCount();
+  },
+  { timezone: "Asia/Kolkata" }
+);
 
 // --- Serve frontend ---
 app.get("/", (req, res) => {
@@ -63,7 +86,6 @@ app.get("/", (req, res) => {
   <head>
     <title>🌟 Shared Counter</title>
     <style>
-      /* Full-screen flex centering */
       body, html {
         height: 100%;
         margin: 0;
@@ -74,9 +96,7 @@ app.get("/", (req, res) => {
         align-items: center;
       }
 
-      .container {
-        text-align: center;
-      }
+      .container { text-align: center; }
 
       h1#title {
         font-size: 48px;
@@ -93,7 +113,7 @@ app.get("/", (req, res) => {
       .buttons {
         display: flex;
         justify-content: center;
-        gap: 60px; /* space between buttons */
+        gap: 60px;
         margin-bottom: 30px;
       }
 
@@ -109,26 +129,13 @@ app.get("/", (req, res) => {
         color: white;
       }
 
-      .btn.increment {
-        background-color: #4CAF50;
-      }
-      .btn.increment:hover {
-        background-color: #45a049;
-        transform: scale(1.05);
-      }
+      .btn.increment { background-color: #4CAF50; }
+      .btn.increment:hover { background-color: #45a049; transform: scale(1.05); }
 
-      .btn.decrement {
-        background-color: #f44336;
-      }
-      .btn.decrement:hover {
-        background-color: #e53935;
-        transform: scale(1.05);
-      }
+      .btn.decrement { background-color: #f44336; }
+      .btn.decrement:hover { background-color: #e53935; transform: scale(1.05); }
 
-      #status {
-        font-size: 20px;
-        color: gray;
-      }
+      #status { font-size: 20px; color: gray; }
     </style>
   </head>
   <body>
@@ -143,78 +150,48 @@ app.get("/", (req, res) => {
     </div>
 
     <script>
-  const countEl = document.getElementById('count');
-  const statusEl = document.getElementById('status');
+      const countEl = document.getElementById('count');
+      const statusEl = document.getElementById('status');
 
-  async function fetchCount() {
-    const res = await fetch('/count');
-    const data = await res.json();
-    countEl.textContent = data.count; // note: backend sends { count: ... }
-  }
+      async function fetchCount() {
+        const res = await fetch('/count');
+        const data = await res.json();
+        countEl.textContent = data.value;
+      }
 
-  async function updateCount(delta) {
-    await fetch('/update', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ delta })
-    });
-  }
+      async function updateCount(delta) {
+        const url = delta > 0 ? '/increment' : '/decrement';
+        await fetch(url, { method: 'POST' });
+      }
 
-  // --- WebSocket setup ---
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(protocol + '//' + window.location.host);
+      // WebSocket setup
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(protocol + '//' + window.location.host);
 
-  ws.onopen = () => statusEl.textContent = "Live 🔴";
-  ws.onclose = () => statusEl.textContent = "Disconnected ⚪";
-  ws.onerror = () => statusEl.textContent = "Error ⚠️";
+      ws.onopen = () => statusEl.textContent = "Live 🔴";
+      ws.onclose = () => statusEl.textContent = "Disconnected ⚪";
+      ws.onerror = () => statusEl.textContent = "Error ⚠️";
 
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.type === 'countUpdate') {
-      countEl.textContent = msg.value;
-    }
-  };
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'counter') countEl.textContent = msg.value;
+      };
 
-  fetchCount();
-</script>
-
+      fetchCount();
+    </script>
   </body>
 </html>
-
   `);
 });
 
-// --- HTTP + WebSocket combined server ---
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
-
-function broadcastCount(value) {
-  const payload = JSON.stringify({ type: "countUpdate", value });
-  for (const client of wss.clients) {
-    if (client.readyState === 1) client.send(payload);
-  }
+// --- Self-ping to keep Render awake ---
+if (process.env.RENDER_EXTERNAL_URL) {
+  setInterval(() => {
+    fetch(`https://${process.env.RENDER_EXTERNAL_URL}`).catch(() => {});
+    console.log("🔁 Self-ping to keep alive");
+  }, 20 * 60 * 1000);
 }
 
-wss.on("connection", (ws) => {
-  db.get("SELECT value FROM counter WHERE id = 1", (err, row) => {
-    if (!err && row)
-      ws.send(JSON.stringify({ type: "countUpdate", value: row.value }));
-  });
-});
-
+// --- Start server ---
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
-
-
-// ----------------------
-// Self-ping to stay alive
-// ----------------------
-setInterval(async () => {
-  try {
-    const url = `http://localhost:${PORT}/count`; // hit your own /count route
-    const res = await fetch(url);
-    if (res.ok) console.log("🔔 Self-ping successful");
-  } catch (err) {
-    console.error("⚠️ Self-ping failed:", err);
-  }
-}, 10 * 60 * 1000); // every 10 minutes
