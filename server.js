@@ -1,31 +1,41 @@
 import express from "express";
+// Node 18+ already includes global fetch — no import needed
 import cron from "node-cron";
 import { WebSocketServer } from "ws";
 import http from "http";
-import Database from "@replit/database";
 
-const db = new Database();
 const app = express();
 app.use(express.json());
 
-// --- Initialize counter ---
-async function initCount() {
-  let count = await db.get("count");
-  if (count === null) {
-    await db.set("count", 0);
-    console.log("✅ Initialized count = 0");
-  } else {
-    console.log(`✅ Loaded count = ${count}`);
-  }
-}
-await initCount();
+// --- JSONBin setup ---
+const BIN_ID = process.env.BIN_ID;
+const API_KEY = process.env.API_KEY;
+const BASE_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
 async function getCount() {
-  return (await db.get("count")) ?? 0;
+  const res = await fetch(BASE_URL, {
+    headers: { "X-Master-Key": API_KEY },
+  });
+  const data = await res.json();
+
+  // Debug log to check what JSONBin returns
+  if (!data || !data.record) {
+    console.error("Unexpected JSONBin response:", JSON.stringify(data));
+    return 0; // fallback
+  }
+
+  return data.record.count ?? 0;
 }
 
-async function updateCount(newValue) {
-  await db.set("count", newValue);
+async function updateCount(newCount) {
+  await fetch(BASE_URL, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Master-Key": API_KEY,
+    },
+    body: JSON.stringify({ count: newCount }),
+  });
 }
 
 // --- WebSocket setup ---
@@ -33,38 +43,38 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 async function broadcastCount() {
-  const value = await getCount();
-  const msg = JSON.stringify({ type: "counter", value });
+  const count = await getCount();
+  const msg = JSON.stringify({ type: "counter", value: count });
   wss.clients.forEach((client) => {
     if (client.readyState === 1) client.send(msg);
   });
 }
 
 wss.on("connection", async (ws) => {
-  const value = await getCount();
-  ws.send(JSON.stringify({ type: "counter", value }));
+  const count = await getCount();
+  ws.send(JSON.stringify({ type: "counter", value: count }));
 });
 
 // --- API routes ---
 app.get("/count", async (req, res) => {
-  const value = await getCount();
-  res.json({ value });
+  const count = await getCount();
+  res.json({ value: count });
 });
 
 app.post("/increment", async (req, res) => {
-  let value = await getCount();
-  value++;
-  await updateCount(value);
+  let count = await getCount();
+  count++;
+  await updateCount(count);
   broadcastCount();
-  res.json({ value });
+  res.json({ value: count });
 });
 
 app.post("/decrement", async (req, res) => {
-  let value = await getCount();
-  value--;
-  await updateCount(value);
+  let count = await getCount();
+  count--;
+  await updateCount(count);
   broadcastCount();
-  res.json({ value });
+  res.json({ value: count });
 });
 
 // --- Daily reset at 11 PM IST ---
@@ -78,7 +88,7 @@ cron.schedule(
   { timezone: "Asia/Kolkata" }
 );
 
-// --- Frontend ---
+// --- Serve frontend ---
 app.get("/", (req, res) => {
   res.send(`
 <html>
@@ -88,28 +98,52 @@ app.get("/", (req, res) => {
       body, html {
         height: 100%;
         margin: 0;
-        font-family: 'Segoe UI', sans-serif;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         background-color: #f5f5f5;
         display: flex;
         justify-content: center;
         align-items: center;
       }
+
       .container { text-align: center; }
-      h1#title { font-size: 48px; color: #333; margin-bottom: 40px; }
-      h1#count { font-size: 120px; margin-bottom: 50px; color: #222; }
-      .buttons { display: flex; justify-content: center; gap: 60px; margin-bottom: 30px; }
+
+      h1#title {
+        font-size: 48px;
+        margin-bottom: 40px;
+        color: #333;
+      }
+
+      h1#count {
+        font-size: 120px;       
+        margin-bottom: 50px;
+        color: #222;
+      }
+
+      .buttons {
+        display: flex;
+        justify-content: center;
+        gap: 60px;
+        margin-bottom: 30px;
+      }
+
       .btn {
-        font-size: 60px;
+        font-size: 60px;        
         width: 120px;
         height: 120px;
         border-radius: 50%;
         border: none;
         box-shadow: 0 5px 15px rgba(0,0,0,0.2);
         cursor: pointer;
+        transition: transform 0.1s, background-color 0.2s;
         color: white;
       }
+
       .btn.increment { background-color: #4CAF50; }
+      .btn.increment:hover { background-color: #45a049; transform: scale(1.05); }
+
       .btn.decrement { background-color: #f44336; }
+      .btn.decrement:hover { background-color: #e53935; transform: scale(1.05); }
+
       #status { font-size: 20px; color: gray; }
     </style>
   </head>
@@ -118,11 +152,12 @@ app.get("/", (req, res) => {
       <h1 id="title">🌟 SAH LIVE OP COUNTER 🌟</h1>
       <h1 id="count">0</h1>
       <div class="buttons">
-        <button class="btn decrement" onclick="updateCount(-1)">−</button>
+        <button class="btn decrement" onclick="updateCount(-1)">-</button>
         <button class="btn increment" onclick="updateCount(1)">+</button>
       </div>
       <div id="status">Connecting...</div>
     </div>
+
     <script>
       const countEl = document.getElementById('count');
       const statusEl = document.getElementById('status');
@@ -138,6 +173,7 @@ app.get("/", (req, res) => {
         await fetch(url, { method: 'POST' });
       }
 
+      // WebSocket setup
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(protocol + '//' + window.location.host);
 
@@ -156,6 +192,14 @@ app.get("/", (req, res) => {
 </html>
   `);
 });
+
+// --- Self-ping to keep Render awake ---
+if (process.env.RENDER_EXTERNAL_URL) {
+  setInterval(() => {
+    fetch(`https://${process.env.RENDER_EXTERNAL_URL}`).catch(() => {});
+    console.log("🔁 Self-ping to keep alive");
+  }, 20 * 60 * 1000);
+}
 
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
